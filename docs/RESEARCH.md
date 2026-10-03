@@ -24,6 +24,12 @@ Mono 的 `mono_field_set_value` 对引用字段接收对象指针本身，不是
 
 ## 验证边界
 
-已实际验证 Steam 自动加载代理、Mono API 初始化、独立原生窗口、冻结时 Time.time 不变且 frameCount 继续增加、游戏截图、关卡中对象图采集与压缩。
+2026-10-03 当前实现已改为游戏 API 存读档。已实际验证 Steam 自动加载代理、Mono API 初始化、F5 游戏数据及截图保存、独立原生读取窗口、取消恢复、同场景及 `C1L2S1 → C1L2S2` 跨场景加载。
 
-跨场景绑定、动态对象重建、战斗中的协程与原生动画状态仍需逐项实测。源码中的实验实现不代表这些验收项已全部通过。
+关卡中读取窗口打开时，两次探测的 `Time.time` 均为 96.61233，`frameCount` 从 76376 增至 78769，确认逻辑暂停而渲染继续。确认后在同一次窗口主线程回调内恢复时间、动画及音频，再立即启动 `LevelManager.LoadLevelByPosition`，加载协程不会被暂停钩子拦截。
+
+实测发现 `STARTUPINFO` 的隐藏参数会让第一次 `ShowWindow` 无效，产生“游戏暂停但没有窗口”。已移除选择器的隐藏启动标志，并增加第二次显式显示以兼容仍在运行的旧 DLL；原生窗口回归测试覆盖该条件。
+
+原型中 `GetObject`、`GetBuffer`、`R.set_GameData`、`LoadLevelByPosition` 的引用参数误传为指针地址，已改为 Mono 要求的对象指针。真正的 `GameData.LoadPlayerAttribute(ref PlayerAttribute, ...)` 仍传引用地址。`ChangeState` 按完整签名选择 string 重载。
+
+完整战斗恢复的历史验收标准尚未达成。测试中战斗存档有两只敌人未能在新场景唯一匹配，日志明确记录；波次、协程、子弹及掉落物不属于当前已验证恢复范围。钩子可行性及当前取舍见 README.md。测试证据保留在忽略的 `analysis/validation-20261003/`。

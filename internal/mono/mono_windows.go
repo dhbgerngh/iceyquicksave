@@ -124,6 +124,9 @@ func (a *API) Method(c uintptr, name string, n int) uintptr {
 
 // Exact selects overloads by their complete parameter type names.
 func (a *API) Exact(c uintptr, name string, types ...string) uintptr {
+	if c == 0 {
+		return 0
+	}
 	var it uintptr
 	for {
 		m := a.Call("mono_class_get_methods", c, winapi.Ptr(&it))

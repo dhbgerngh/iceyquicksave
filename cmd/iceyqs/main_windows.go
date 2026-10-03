@@ -17,7 +17,7 @@ func main() {
 	request := flag.String("request", "", "save, picker, cancel, or probe")
 	flag.Parse()
 	if *errorText != "" {
-		winapi.Message("操作未完成，已恢复游戏逻辑。\n\n" + *errorText)
+		winapi.Message("操作未完成，已解除工具的逻辑拦截。\n\n" + *errorText)
 		return
 	}
 	if *root == "" {
@@ -34,7 +34,7 @@ func main() {
 		return
 	}
 	if *request != "" {
-		if *request != "save" && *request != "picker" && *request != "cancel" && *request != "probe" && *request != "debug-screenshot" && *request != "debug-continue" {
+		if *request != "save" && *request != "picker" && *request != "cancel" && *request != "probe" {
 			fmt.Fprintln(os.Stderr, "unknown request")
 			os.Exit(2)
 		}
@@ -55,5 +55,5 @@ func main() {
 		}
 		return
 	}
-	winapi.Message("ICEY Quick Save（实验版本）\n\n安装代理 DLL 后，从 Steam 正常启动 ICEY。\nF5：保存同会话快照和截图\nF9：冻结逻辑并打开独立快照选择窗口\n\n当前版本不支持完整的任意时刻恢复：协程调度、动画过渡、物理接触缓存以及跨场景 / 跨会话恢复尚未实现。\n原版 Steam 存档不会被本工具主动覆盖。\n详见项目 README.md 和 savedata 中的日志。")
+	winapi.Message("ICEY Quick Save\n\n从 Steam 正常启动 ICEY。\nF5：保存游戏进度、角色状态和截图\nF9：先暂停游戏逻辑，再打开读取界面\n确认读取：恢复游戏并立即调用游戏读档接口\n取消或关闭窗口：恢复游戏\n\n支持同地图及跨地图加载，战斗由游戏重新初始化；波次、协程、子弹及掉落物不能完整回滚。旧版对象快照需重新保存。\n本工具不直接写入 Steam 存档；游戏仍会正常自动保存。\n详见项目 README.md 和 savedata 中的日志。")
 }

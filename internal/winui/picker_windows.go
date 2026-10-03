@@ -19,6 +19,11 @@ type Slot struct {
 	ID, Session, Created, Scene, Status string
 	Objects                             int
 }
+
+func (s Slot) loadable() bool {
+	return s.Status == "game-api" || s.Status == "api-diagnostic-not-loadable"
+}
+
 type WndClass struct {
 	Size, Style                        uint32
 	Proc                               uintptr
@@ -66,12 +71,19 @@ func Picker(root, session string) (string, error) {
 	defer runtime.UnlockOSThread()
 	winapi.U("SetProcessDPIAware")
 	slots := ReadSlots(root)
-	var hwnd, list uintptr
+	var hwnd, list, loadButton uintptr
 	selected := ""
 	var pixels []byte
 	var iw, ih int32
 	loadPreview := func(index int) {
 		pixels = nil
+		if loadButton != 0 {
+			var enabled uintptr
+			if index >= 0 && index < len(slots) && slots[index].loadable() {
+				enabled = 1
+			}
+			winapi.U("EnableWindow", loadButton, enabled)
+		}
 		if index < 0 || index >= len(slots) {
 			return
 		}
@@ -103,6 +115,9 @@ func Picker(root, session string) (string, error) {
 			return
 		}
 		s := slots[idx]
+		if !s.loadable() {
+			return
+		}
 		selected = s.ID
 		winapi.U("DestroyWindow", hwnd)
 	}
@@ -157,7 +172,7 @@ func Picker(root, session string) (string, error) {
 	if winapi.U("RegisterClassExW", winapi.Ptr(&wc)) == 0 {
 		return "", fmt.Errorf("RegisterClassExW failed")
 	}
-	hwnd = winapi.U("CreateWindowExW", 0, winapi.Ptr(name), winapi.Ptr(winapi.UTF("ICEY 快照选择 · 实验版本")), 0x00ca0000, 100, 100, 1020, 560, 0, 0, inst, 0)
+	hwnd = winapi.U("CreateWindowExW", 0, winapi.Ptr(name), winapi.Ptr(winapi.UTF("ICEY 读取存档")), 0x00ca0000, 100, 100, 1020, 560, 0, 0, inst, 0)
 	if hwnd == 0 {
 		return "", fmt.Errorf("CreateWindowExW failed")
 	}
@@ -165,13 +180,15 @@ func Picker(root, session string) (string, error) {
 		return winapi.U("CreateWindowExW", 0, winapi.Ptr(winapi.UTF(class)), winapi.Ptr(winapi.UTF(text)), 0x50000000|style, uintptr(x), uintptr(y), uintptr(w), uintptr(h), hwnd, id, inst, 0)
 	}
 	child("STATIC", "游戏逻辑已冻结。关闭窗口可取消并继续游戏。", 0, 20, 16, 950, 24, 0)
-	child("STATIC", "读取将重建目标地图与战斗对象，怪物 AI 重新决策。跨地图恢复仍在验证。", 0, 20, 40, 950, 24, 0)
+	child("STATIC", "确认后恢复游戏并立即读档。恢复地图、进度和角色；战斗会重新初始化，非完整战斗回滚。", 0, 20, 40, 980, 24, 0)
 	list = child("LISTBOX", "", 0x00a10001, 20, 70, 320, 360, 1001)
-	child("BUTTON", "读取所选快照", 0x10001, 360, 455, 190, 36, 1002)
+	loadButton = child("BUTTON", "读取所选存档", 0x10001, 360, 455, 190, 36, 1002)
 	child("BUTTON", "取消 / 继续游戏", 0x10000, 570, 455, 190, 36, 1003)
 	for _, s := range slots {
 		suffix := ""
-		if s.Session != session {
+		if !s.loadable() {
+			suffix = " [旧版不兼容，请重新保存]"
+		} else if session != "" && s.Session != "" && s.Session != session {
 			suffix = " [其他会话]"
 		}
 		label := s.Created + "  " + s.Scene + suffix
@@ -181,9 +198,14 @@ func Picker(root, session string) (string, error) {
 		winapi.U("SendMessageW", list, 0x186, 0, 0)
 		loadPreview(0)
 	} else {
+		winapi.U("EnableWindow", loadButton, 0)
 		child("STATIC", "还没有快照。返回游戏后按 F5。", 0, 360, 100, 550, 30, 0)
 	}
+	// The first ShowWindow may obey a parent's STARTUPINFO SW_HIDE (older
+	// agents launched this GUI helper with HideWindow). A second explicit
+	// show honors SW_SHOWNORMAL and also works with those installed agents.
 	winapi.U("ShowWindow", hwnd, 5)
+	winapi.U("ShowWindow", hwnd, 1)
 	winapi.U("UpdateWindow", hwnd)
 	winapi.U("SetForegroundWindow", hwnd)
 	var msg winapi.Msg
@@ -197,6 +219,10 @@ func Picker(root, session string) (string, error) {
 		}
 		if msg.Message == 0x100 && msg.Wparam == 0x1b {
 			winapi.U("DestroyWindow", hwnd)
+			continue
+		}
+		if msg.Message == 0x100 && msg.Wparam == 0x0d && msg.Hwnd == list {
+			accept()
 			continue
 		}
 		if winapi.U("IsDialogMessageW", hwnd, winapi.Ptr(&msg)) == 0 {
