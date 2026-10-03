@@ -7,6 +7,7 @@ import (
 	"iceyquicksave/internal/winapi"
 	"path/filepath"
 	"time"
+	"unsafe"
 )
 
 type crossJob struct {
@@ -24,6 +25,14 @@ type crossJob struct {
 
 func (s *agent) captureRoots(v *saved) error {
 	a := s.a
+	v.Clock = map[string]float32{}
+	for name := range s.clocks {
+		b, e := a.Static("UnityEngine", "UnityEngine", "Time", "get_"+name)
+		if e != nil {
+			return e
+		}
+		v.Clock[name] = *(*float32)(unsafe.Pointer(a.Call("mono_object_unbox", b)))
+	}
 	if e := v.World.Capture(); e != nil {
 		return e
 	}
@@ -71,7 +80,7 @@ func (s *agent) captureRoots(v *saved) error {
 			}
 		}
 	}
-	return nil
+	return s.captureCoroutines(v)
 }
 func releaseSave(v *saved) {
 	if v == nil {
@@ -137,6 +146,7 @@ func (s *agent) stepCross() {
 			j.stage = 1
 		}
 	case 1:
+		s.clearCoroutines()
 		// Stop old coroutine schedules through Unity, keeping rendering and scene loading alive.
 		objs, e := a.Find("UnityEngine", "UnityEngine", "MonoBehaviour")
 		if e != nil {
@@ -212,6 +222,17 @@ func (s *agent) stepCross() {
 		}
 		j.stage = 5
 	case 5:
+		for name, clock := range s.clocks {
+			if saved, ok := j.target.Clock[name]; ok {
+				b, e := a.Static("UnityEngine", "UnityEngine", "Time", "get_"+name)
+				if e != nil {
+					s.crossFailure(e)
+					return
+				}
+				now := *(*float32)(unsafe.Pointer(a.Call("mono_object_unbox", b)))
+				clock.Shift(now - saved)
+			}
+		}
 		if e := j.graph.Restore(); e != nil {
 			s.crossFailure(e)
 			return
@@ -250,6 +271,10 @@ func (s *agent) stepCross() {
 		}
 		s.freeze.Animators = nil
 		s.freeze.Scale = append([]byte(nil), j.target.Scale...)
+		if e = s.queueCoroutines(j.target, j.graph); e != nil {
+			s.crossFailure(e)
+			return
+		}
 		// Rebuilt wrappers are now rooted by scene components and static fields.
 		j.graph.Release()
 		j.engine.Release()

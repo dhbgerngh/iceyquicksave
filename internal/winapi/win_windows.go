@@ -2,6 +2,7 @@ package winapi
 
 import (
 	"fmt"
+	"sync"
 	"syscall"
 	"unsafe"
 )
@@ -36,8 +37,10 @@ type windowSearch struct {
 	Result uintptr
 }
 
+var windowMu sync.Mutex
+var windowQuery windowSearch
 var enumWindowCallback = syscall.NewCallback(func(h, l uintptr) uintptr {
-	q := (*windowSearch)(unsafe.Pointer(l))
+	q := &windowQuery
 	var p uint32
 	U("GetWindowThreadProcessId", h, Ptr(&p))
 	if p == q.PID && U("IsWindowVisible", h) != 0 && U("GetWindow", h, 4) == 0 {
@@ -48,9 +51,11 @@ var enumWindowCallback = syscall.NewCallback(func(h, l uintptr) uintptr {
 })
 
 func Window(pid uint32) uintptr {
-	q := windowSearch{PID: pid}
-	U("EnumWindows", enumWindowCallback, Ptr(&q))
-	return q.Result
+	windowMu.Lock()
+	defer windowMu.Unlock()
+	windowQuery = windowSearch{PID: pid}
+	U("EnumWindows", enumWindowCallback, 0)
+	return windowQuery.Result
 }
 func Alloc(n int) (uintptr, error) {
 	p := K("VirtualAlloc", 0, uintptr(n), 0x3000, 0x40)

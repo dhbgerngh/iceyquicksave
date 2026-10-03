@@ -74,6 +74,9 @@ func (g *Graph) Object(id int) uintptr {
 	if id <= 0 || id > len(g.Nodes) {
 		return 0
 	}
+	if g.Nodes[id-1].Kind == "null" {
+		return 0
+	}
 	return g.a.Target(g.Nodes[id-1].handle)
 }
 func (g *Graph) Statics(c uintptr) error {
@@ -148,6 +151,14 @@ func (g *Graph) capture(n *Node) error {
 		n.TypeName = a.String(boxed)
 		a.Free(rh)
 		g.typeNames[c] = n.TypeName
+	}
+	if strings.HasPrefix(n.Class, "UI") || strings.HasPrefix(n.Class, "NGUI") || n.Class == "DetailInfoAnim" {
+		n.Kind = "ui-cache"
+		return nil
+	}
+	if a.IsUnity(c) && !a.Alive(o) {
+		n.Kind = "null"
+		return nil
 	}
 	if a.IsUnity(c) && g.World != nil {
 		var e error
@@ -309,6 +320,9 @@ func (g *Graph) Validate() error {
 		return fmt.Errorf("Array.SetValue unavailable")
 	}
 	for _, n := range g.Nodes {
+		if n.Kind == "null" || n.Kind == "ui-cache" {
+			continue
+		}
 		o := g.a.Target(n.handle)
 		if o == 0 {
 			if n.Kind == "opaque" || n.Kind == "delegate" {
@@ -368,6 +382,9 @@ func (g *Graph) Rollback() (*Graph, error) {
 }
 func (g *Graph) applyField(f Field, object uintptr) error {
 	a := g.a
+	if f.Value > 0 && g.Nodes[f.Value-1].Kind == "ui-cache" {
+		return nil
+	}
 	v := g.Object(f.Value)
 	typ := a.Call("mono_class_from_mono_type", f.meta.Type)
 	if strings.HasPrefix(a.ClassName(typ), "System.Nullable`") {

@@ -19,13 +19,20 @@ type Native struct {
 }
 
 func (s *Engine) Identify(w *World) error {
+	var keep []Native
 	for i := range s.Items {
 		r, e := w.Ref(s.a.Target(s.Items[i].handle))
 		if e != nil {
 			return e
 		}
+		if r.Key == "" {
+			s.a.Free(s.Items[i].handle)
+			continue
+		}
 		s.Items[i].Ref = r
+		keep = append(keep, s.Items[i])
 	}
+	s.Items = keep
 	return nil
 }
 

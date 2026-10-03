@@ -40,6 +40,8 @@ type saved struct {
 	Graph                       *snapshot.Graph
 	Engine                      *snapshot.Engine
 	World                       *snapshot.World
+	Coroutines                  []coroutineState
+	Clock                       map[string]float32
 	Scale                       []byte
 	animators                   map[uintptr][]byte
 }
@@ -75,6 +77,9 @@ type agent struct {
 	job            *captureJob
 	loading        *loadJob
 	cross          *crossJob
+	coroutines     map[uintptr]*observedCoroutine
+	resuming       []resumedCoroutine
+	clocks         map[string]*hook.FloatClock
 	picker         chan pickerResult
 	pickerCmd      *exec.Cmd
 	retained       map[string]*saved
@@ -107,7 +112,7 @@ func Run() {
 		f.Close()
 		return
 	}
-	s := &agent{root: root, session: hex.EncodeToString(token), logger: log.New(f, "", log.LstdFlags|log.Lmicroseconds), retained: map[string]*saved{}}
+	s := &agent{root: root, session: hex.EncodeToString(token), logger: log.New(f, "", log.LstdFlags|log.Lmicroseconds), retained: map[string]*saved{}, coroutines: map[uintptr]*observedCoroutine{}}
 	s.logger.Println("Go proxy loaded; experimental same-session snapshots; no complete-state guarantee")
 	pid := uint32(os.Getpid())
 	for i := 0; i < 2400; i++ {
@@ -165,8 +170,8 @@ func (s *agent) init() error {
 	s.trueHandle = a.Pin(s.trueBox)
 	cb := syscall.NewCallback(func(method, obj, args, exception uintptr) uintptr {
 		s.invoked.Add(1)
+		name := mono.CString(a.Call("mono_method_get_name", method))
 		if s.paused.Load() {
-			name := mono.CString(a.Call("mono_method_get_name", method))
 			blocked := name == "Update" || name == "LateUpdate" || name == "FixedUpdate" || name == "OnGUI" || name == "OnApplicationFocus" || name == "OnApplicationPause" || strings.HasPrefix(name, "OnState")
 			if name == "MoveNext" {
 				s.skipped.Add(1)
@@ -199,7 +204,18 @@ func (s *agent) init() error {
 				return 0
 			}
 		}
-		return hook.Call(s.originalInvoke, method, obj, args, exception)
+		result := hook.Call(s.originalInvoke, method, obj, args, exception)
+		if name == "InvokeMoveNext" && args != 0 {
+			iterator := winapi.ReadPtr(args)
+			p := winapi.ReadPtr(args + 8)
+			if p != 0 {
+				out := winapi.ReadPtr(p)
+				if out != 0 {
+					s.observeCoroutine(iterator, *(*byte)(unsafe.Pointer(out)) != 0)
+				}
+			}
+		}
+		return result
 	})
 	original, e := hook.Install(a.Addr("mono_runtime_invoke"), cb, func(p uintptr) { s.originalInvoke = p; a.InvokeFunc = p })
 	if e != nil {
@@ -208,6 +224,22 @@ func (s *agent) init() error {
 	s.originalInvoke = original
 	a.InvokeFunc = original
 	s.logger.Printf("Mono ready; domain=%x; runtime_invoke trampoline installed", a.Domain)
+	s.clocks = map[string]*hook.FloatClock{}
+	for _, name := range []string{"time", "fixedTime", "unscaledTime", "realtimeSinceStartup"} {
+		m := a.Method(a.Class("UnityEngine", "UnityEngine", "Time"), "get_"+name, 0)
+		if m == 0 {
+			continue
+		}
+		fn := a.Call("mono_lookup_internal_call", m)
+		if fn == 0 {
+			return fmt.Errorf("Time.%s icall missing", name)
+		}
+		c, e := hook.InstallClock(fn)
+		if e != nil {
+			return fmt.Errorf("Time.%s: %w", name, e)
+		}
+		s.clocks[name] = c
+	}
 	s.status("ready", nil)
 	return nil
 }
@@ -265,6 +297,14 @@ func (s *agent) tick() {
 		s.debugScreenshot()
 	case "debug-continue":
 		s.debugContinue()
+	default:
+		if strings.HasPrefix(request, "load:") && !s.busy {
+			if e := s.pause(); e != nil {
+				s.abort(e)
+			} else {
+				s.load(strings.TrimPrefix(request, "load:"))
+			}
+		}
 	}
 	if s.job != nil {
 		s.stepSave()
@@ -275,6 +315,7 @@ func (s *agent) tick() {
 	if s.cross != nil {
 		s.stepCross()
 	}
+	s.stepCoroutines()
 	if s.picker != nil {
 		select {
 		case r := <-s.picker:

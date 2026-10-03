@@ -34,7 +34,7 @@ func Open(path string) (*API, error) {
 		}
 		a.procs[n] = p
 	}
-	for _, n := range []string{"mono_field_get_object", "mono_object_new", "mono_array_new", "mono_reflection_type_from_name", "mono_object_get_virtual_method"} {
+	for _, n := range []string{"mono_field_get_object", "mono_object_new", "mono_array_new", "mono_reflection_type_from_name", "mono_object_get_virtual_method", "mono_lookup_internal_call"} {
 		p, e := d.FindProc(n)
 		if e != nil {
 			return nil, e

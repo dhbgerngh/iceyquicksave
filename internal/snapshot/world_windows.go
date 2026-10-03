@@ -79,6 +79,20 @@ func (w *World) Capture() error {
 			return e
 		}
 		name, e := a.Get(goj, "name")
+		comps, ce := w.components(goj)
+		if ce != nil {
+			return ce
+		}
+		cacheOnly := false
+		for _, c := range comps {
+			if c != 0 && a.ClassName(a.Call("mono_object_get_class", c)) == "UIDrawCall" {
+				cacheOnly = true
+				break
+			}
+		}
+		if cacheOnly {
+			continue
+		}
 		if e != nil {
 			return e
 		}

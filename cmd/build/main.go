@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 )
 
 type Manifest struct {
@@ -96,9 +97,17 @@ func main() {
 			if _, e = os.Stat(p); e == nil {
 				h, e := digest(p)
 				must(e)
-				if existing.Files[n] != h {
+				builtHash, builtErr := digest(filepath.Join("dist", n))
+				if existing.Files[n] != h && !(builtErr == nil && h == builtHash) {
 					must(fmt.Errorf("refusing to replace unowned/modified file: %s", p))
 				}
+				wide, e := syscall.UTF16PtrFromString(p)
+				must(e)
+				handle, e := syscall.CreateFile(wide, 0x10000|syscall.GENERIC_READ, 0, nil, syscall.OPEN_EXISTING, syscall.FILE_ATTRIBUTE_NORMAL, 0)
+				if e != nil {
+					must(fmt.Errorf("请先关闭 ICEY 和快照选择/错误窗口：%s: %w", p, e))
+				}
+				syscall.CloseHandle(handle)
 			} else if !os.IsNotExist(e) {
 				must(e)
 			}

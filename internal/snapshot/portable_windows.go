@@ -97,7 +97,7 @@ func (g *Graph) Rebind(a *mono.API, w *World) (*Graph, error) {
 		n := out.Nodes[id-1]
 		var obj uintptr
 		var e error
-		if n.Ref != nil {
+		if n.Ref != nil && n.Ref.Key != "" {
 			obj, e = w.Resolve(n.Ref)
 		} else if n.Anchor != nil {
 			an := n.Anchor
@@ -133,6 +133,9 @@ func (g *Graph) Rebind(a *mono.API, w *World) (*Graph, error) {
 				}
 			}
 		}
+		if obj == 0 && n.Ref != nil && e == nil {
+			obj, e = w.Resolve(n.Ref)
+		}
 		if e != nil {
 			return 0, e
 		}
@@ -154,7 +157,7 @@ func (g *Graph) Rebind(a *mono.API, w *World) (*Graph, error) {
 		}
 	}
 	for _, n := range out.Nodes {
-		if n.handle != 0 || n.Kind == "opaque" || n.Kind == "delegate" || n.Kind == "ai-reset" {
+		if n.handle != 0 || n.Kind == "opaque" || n.Kind == "delegate" || n.Kind == "ai-reset" || n.Kind == "null" || n.Kind == "ui-cache" {
 			continue
 		}
 		var obj uintptr
