@@ -1,0 +1,6 @@
+/analysis/
+/tools/
+/dist/
+/savedata/
+*.log
+*.test.exe
